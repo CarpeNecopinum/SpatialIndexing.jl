@@ -19,18 +19,24 @@ end
 
 leaves(oct::Octree) = filter(x->x.firstChild == 0, oct.cells)
 
-function split_cell!(tree::Octree{T}, idx::Int) where {T}
+function split_cell!(tree::Octree{T}, idx::Int, bins) where {T}
     cell = tree.cells[idx] = with_child(tree.cells[idx], length(tree.cells) + 1)
     c = cell.center
+    empty!.(bins)
 
-    bins = ntuple(_->Int32[], 8)
     for i in cell.firstPoint:cell.lastPoint
         idx = tree.indices[i]
         delta = tree.points[idx] .< c
         bindex = (delta[1] | delta[2] << 1 | delta[3] << 2) + 1
         push!(bins[bindex], idx)
     end
-    tree.indices[cell.firstPoint:cell.lastPoint] = vcat(bins...)
+    offset = cell.firstPoint
+    for bin in bins
+        tree.indices[offset:(offset + length(bin)-1)] = bin
+        offset += length(bin)
+    end
+
+    #tree.indices[cell.firstPoint:cell.lastPoint] = vcat(bins...)
 
     current_index = cell.firstPoint
     ha = cell.extent / 2
@@ -67,16 +73,24 @@ function Octree(data::AbstractVector{Vec3{T}}; leafsize::Int = 16) where {T}
     if length(root) > leafsize
         push!(split_queue, 1) end
 
+    bins = ntuple(_->Int32[], 8)
     while !isempty(split_queue)
         split_idx = popfirst!(split_queue)
-        split_cell!(result, split_idx)
+        split_cell!(result, split_idx, bins)
 
-        splits = Int[]
+        first_filled = 0
         for i in eachindex(result.cells)[end-7:end]
             if length(result.cells[i]) > leafsize
-                push!(splits, i) end end
-        if length(splits) > 1
-            append!(split_queue, splits)
+                if first_filled == 0
+                    first_filled = i
+                else
+                    if first_filled != -1
+                        push!(split_queue, first_filled)
+                        first_filled = -1
+                    end
+                    push!(split_queue, i)
+                end
+            end
         end
     end
 
